@@ -3,13 +3,16 @@ import {
   Eye,
   EyeOff,
   FlipHorizontal2,
+  Layers,
   RotateCcw,
 } from 'lucide-react';
-import { PosePresetId } from '../types/bitruvius';
+import { PosePresetId, SilhouetteDisplayMode } from '../types';
 
 interface TopConsoleBarProps {
   showFigure: boolean;
   onToggleFigure: () => void;
+  silhouetteMode: SilhouetteDisplayMode;
+  onToggleSilhouetteMode: () => void;
   activePreset: PosePresetId | null;
   onSelectPreset: (preset: PosePresetId) => void;
   onMirrorPose: () => void;
@@ -26,6 +29,8 @@ const POSE_PRESETS: { id: PosePresetId; label: string }[] = [
 export const TopConsoleBar: React.FC<TopConsoleBarProps> = ({
   showFigure,
   onToggleFigure,
+  silhouetteMode,
+  onToggleSilhouetteMode,
   activePreset,
   onSelectPreset,
   onMirrorPose,
@@ -38,7 +43,7 @@ export const TopConsoleBar: React.FC<TopConsoleBarProps> = ({
         BITRUVIUS EVOLVED
       </span>
 
-      {/* Right Workspace Actions */}
+      {/* Right Workspace Actions (All controls docked strictly outside canvas) */}
       <div className="flex items-center gap-1.5 shrink-0">
         {showFigure && (
           <>
@@ -58,6 +63,24 @@ export const TopConsoleBar: React.FC<TopConsoleBarProps> = ({
                 </button>
               ))}
             </div>
+
+            <button
+              type="button"
+              onClick={onToggleSilhouetteMode}
+              title={
+                silhouetteMode === 'wireframe'
+                  ? 'Strip wireframe overlays for Pure Shadow display'
+                  : 'Restore 10px joint dots and 3px armature wireframe'
+              }
+              className={`px-2.5 py-1 text-[10.5px] font-typewriter font-bold rounded-[3px] border flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                silhouetteMode === 'pure_shadow'
+                  ? 'bg-[#361547] text-[#FAF6FF] border-[#D8B4FE]/40'
+                  : 'bg-[#21072B] text-[#E6DCF0] hover:bg-[#310E3F] border-[#EBE0F5]/18'
+              }`}
+            >
+              <Layers className="w-3 h-3" />
+              {silhouetteMode === 'wireframe' ? 'Wireframe' : 'Pure Shadow'}
+            </button>
 
             <button
               type="button"

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { GridOriginMode, PYXL_PX, SUBPYXL_PX } from '../types/bitruvius';
+import { GridOriginMode, PYXL_PX, SUBPYXL_PX } from '../types';
+import { ModelBounds, SideCalloutDescriptor, WorldExclusionRect } from '../utils/kinematics';
 
 export const DEFAULT_FPS = 12;
 export const INTERTITLE_BACKSPACE_FRAMES = 6;
@@ -18,7 +19,7 @@ export interface IntertitleItem {
   lines: string[];
   imageUrl?: string;
   imageAlt?: string;
-  position?: 'top-half' | 'center';
+  position?: 'top-half' | 'center' | 'below-model';
 }
 
 interface GridIntertitleLayerProps {
@@ -28,6 +29,9 @@ interface GridIntertitleLayerProps {
   originOffset: { x: number; y: number };
   viewportWidth: number;
   zoom: number;
+  modelBounds?: ModelBounds | null;
+  sideCallouts?: SideCalloutDescriptor[];
+  extraExclusions?: WorldExclusionRect[];
   onTriggerDismiss: () => void;
   onDismissComplete: () => void;
   fps?: number;
@@ -153,6 +157,9 @@ export const GridIntertitleLayer: React.FC<GridIntertitleLayerProps> = ({
   originOffset,
   viewportWidth,
   zoom,
+  modelBounds,
+  sideCallouts = [],
+  extraExclusions = [],
   onTriggerDismiss,
   onDismissComplete,
   fps = DEFAULT_FPS,
@@ -248,28 +255,89 @@ export const GridIntertitleLayer: React.FC<GridIntertitleLayerProps> = ({
   });
 
   const anchorX = originMode === 'center' ? originOffset.x : 7 * PYXL_PX;
-  const isTopHalf = (item.position ?? 'top-half') === 'top-half';
+  const posMode = item.position ?? 'below-model';
+  const isTopHalf = posMode === 'top-half';
+  const isBelowModel = posMode === 'below-model';
   const lineCount = wrappedLines.length;
   const stackPyxls = lineCount * INTERTITLE_LETTER_PYXLS + Math.max(0, lineCount - 1);
+  const originBaseY = originMode === 'center' ? originOffset.y : 0;
 
   // Align every line's baseline & cap-line strictly to integer pyxl rows
   let firstCapPyxlFromOrigin: number;
-  if (isTopHalf && lineCount <= 3) {
-    // Center stack in the 9-pyxl top half (-4.5 pyx midpoint in center mode, +4.5 pyx in corner mode)
-    const midPyxl = originMode === 'center' ? -4.5 : 4.5;
+  if (isBelowModel) {
+    if (modelBounds) {
+      // Snap strictly to the next integer pyxl row cleanly below the feet / lower silhouette
+      firstCapPyxlFromOrigin = Math.ceil((modelBounds.maxY - originBaseY) / PYXL_PX);
+    } else {
+      firstCapPyxlFromOrigin = originMode === 'center' ? 5 : 14;
+    }
+  } else if (isTopHalf && lineCount <= 3) {
     const minCap = originMode === 'center' ? -8 : 1;
-    firstCapPyxlFromOrigin = Math.max(minCap, Math.floor(midPyxl - stackPyxls / 2));
+    if (lineCount === 1) {
+      firstCapPyxlFromOrigin = minCap;
+    } else {
+      const midPyxl = originMode === 'center' ? -5.0 : 4.0;
+      firstCapPyxlFromOrigin = Math.max(minCap, Math.floor(midPyxl - stackPyxls / 2));
+    }
   } else {
-    // Multi-line very thin view (4+ lines) or explicit center mode: center around vertical midpoint
     const midPyxl = originMode === 'center' ? 0 : 9;
     firstCapPyxlFromOrigin = Math.floor(midPyxl - stackPyxls / 2);
   }
 
-  const originBaseY = originMode === 'center' ? originOffset.y : 0;
-  const firstBaselineY = originBaseY + (firstCapPyxlFromOrigin + INTERTITLE_LETTER_PYXLS) * PYXL_PX;
-
   const maxChars = Math.max(1, ...wrappedLines.map((l) => l.length));
   const hitWidth = maxChars * metrics.cellWidth;
+
+  // Safeguard: ensure typeset intertitle block never intersects modelBounds OR any side-rail callout menu
+  const exclusionRects: { minX: number; maxX: number; minY: number; maxY: number }[] = [];
+  if (modelBounds) {
+    exclusionRects.push({
+      minX: modelBounds.minX - 12,
+      maxX: modelBounds.maxX + 12,
+      minY: modelBounds.minY - 12,
+      maxY: modelBounds.maxY + 12,
+    });
+  }
+  for (const c of sideCallouts) {
+    exclusionRects.push({
+      minX: c.worldRect.x - 10,
+      maxX: c.worldRect.x + c.worldRect.width + 10,
+      minY: c.worldRect.y - 8,
+      maxY: c.worldRect.y + c.worldRect.height + 8,
+    });
+  }
+  for (const ex of extraExclusions) {
+    exclusionRects.push(ex);
+  }
+
+  if (exclusionRects.length > 0) {
+    const stackHeightPx = stackPyxls * PYXL_PX;
+    const proposedLeftX = anchorX - hitWidth / 2;
+    const proposedRightX = anchorX + hitWidth / 2;
+
+    for (let guard = 0; guard < 12; guard++) {
+      const proposedTopY = originBaseY + firstCapPyxlFromOrigin * PYXL_PX;
+      const proposedBottomY = proposedTopY + stackHeightPx;
+
+      const blocker = exclusionRects.find(
+        (rect) =>
+          proposedRightX > rect.minX &&
+          proposedLeftX < rect.maxX &&
+          proposedBottomY > rect.minY &&
+          proposedTopY < rect.maxY
+      );
+      if (!blocker) break;
+
+      if (isBelowModel) {
+        firstCapPyxlFromOrigin = Math.ceil((blocker.maxY - originBaseY) / PYXL_PX);
+      } else {
+        firstCapPyxlFromOrigin =
+          Math.floor((blocker.minY - originBaseY) / PYXL_PX) - stackPyxls;
+      }
+    }
+  }
+
+  const firstBaselineY = originBaseY + (firstCapPyxlFromOrigin + INTERTITLE_LETTER_PYXLS) * PYXL_PX;
+
   const topCapY = firstBaselineY - TARGET_CAP_HEIGHT_PX;
   const bottomBaselineY = firstBaselineY + (lineCount - 1) * LINE_STEP_PX;
   const hitHeight = bottomBaselineY - topCapY;
