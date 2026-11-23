@@ -8,6 +8,7 @@ import {
   PAPER_HEIGHT,
   PAPER_WIDTH,
   PYXL_PX,
+  REPOSITORY_ASSET_PATHS,
   SUBPYXL_PX,
   SilhouetteDisplayMode,
 } from '../types';
@@ -45,8 +46,10 @@ interface StageCanvasProps {
   onSelectJoint: (id: JointId) => void;
   onHoverJoint: (id: JointId | null) => void;
   onUpdateArmature: (next: ArmatureState) => void;
+  onCommitPoseHistory?: () => void;
   onCursorMove: (coords: { x: number; y: number } | null) => void;
   stageRef: React.RefObject<HTMLDivElement | null>;
+  svgRef?: React.RefObject<SVGSVGElement | null>;
   intertitleItem: IntertitleItem | null;
   intertitleDismissing: boolean;
   onTriggerDismissIntertitle: () => void;
@@ -100,14 +103,17 @@ export const StageCanvas: React.FC<StageCanvasProps> = ({
   onSelectJoint,
   onHoverJoint,
   onUpdateArmature,
+  onCommitPoseHistory,
   onCursorMove,
   stageRef,
+  svgRef: externalSvgRef,
   intertitleItem,
   intertitleDismissing,
   onTriggerDismissIntertitle,
   onIntertitleDismissComplete,
 }) => {
-  const svgRef = useRef<SVGSVGElement | null>(null);
+  const internalSvgRef = useRef<SVGSVGElement | null>(null);
+  const svgRef = externalSvgRef ?? internalSvgRef;
   const [viewportSize, setViewportSize] = useState({ width: 1440, height: 900 });
 
   useEffect(() => {
@@ -459,10 +465,13 @@ export const StageCanvas: React.FC<StageCanvasProps> = ({
         } catch {
           // ignore if already released
         }
+        if (dragState.type !== 'pan') {
+          onCommitPoseHistory?.();
+        }
         setDragState(null);
       }
     },
-    [dragState]
+    [dragState, onCommitPoseHistory]
   );
 
   const endlessBounds = useMemo(() => {
@@ -895,36 +904,36 @@ export const StageCanvas: React.FC<StageCanvasProps> = ({
             </defs>
             <g opacity={borderOpacity} filter="url(#vector-border-grayscale)">
               <svg x={0} y={0} width={c} height={c} viewBox={`0 0 ${SRC_CORNER} ${SRC_CORNER}`} preserveAspectRatio="none">
-                <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
               </svg>
               <svg x={vw - c} y={0} width={c} height={c} viewBox={`${PAPER_WIDTH - SRC_CORNER} 0 ${SRC_CORNER} ${SRC_CORNER}`} preserveAspectRatio="none">
-                <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
               </svg>
               <svg x={0} y={vh - c} width={c} height={c} viewBox={`0 ${PAPER_HEIGHT - SRC_CORNER} ${SRC_CORNER} ${SRC_CORNER}`} preserveAspectRatio="none">
-                <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
               </svg>
               <svg x={vw - c} y={vh - c} width={c} height={c} viewBox={`${PAPER_WIDTH - SRC_CORNER} ${PAPER_HEIGHT - SRC_CORNER} ${SRC_CORNER} ${SRC_CORNER}`} preserveAspectRatio="none">
-                <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
               </svg>
 
               {midW > 0 && (
                 <svg x={c} y={0} width={midW} height={e} viewBox={`${SRC_CORNER} 0 ${srcMidW} ${SRC_EDGE}`} preserveAspectRatio="none">
-                  <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                  <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
                 </svg>
               )}
               {midW > 0 && (
                 <svg x={c} y={vh - e} width={midW} height={e} viewBox={`${SRC_CORNER} ${PAPER_HEIGHT - SRC_EDGE} ${srcMidW} ${SRC_EDGE}`} preserveAspectRatio="none">
-                  <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                  <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
                 </svg>
               )}
               {midH > 0 && (
                 <svg x={0} y={c} width={e} height={midH} viewBox={`0 ${SRC_CORNER} ${SRC_EDGE} ${srcMidH}`} preserveAspectRatio="none">
-                  <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                  <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
                 </svg>
               )}
               {midH > 0 && (
                 <svg x={vw - e} y={c} width={e} height={midH} viewBox={`${PAPER_WIDTH - SRC_EDGE} ${SRC_CORNER} ${SRC_EDGE} ${srcMidH}`} preserveAspectRatio="none">
-                  <image href="/assets/aistudio/Vector_paper_2dac36ce.svg" x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
+                  <image href={REPOSITORY_ASSET_PATHS.vectorBorderSvg} x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} />
                 </svg>
               )}
             </g>

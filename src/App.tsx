@@ -11,28 +11,31 @@ import {
   ArmatureState,
   BONE_SCALE_MAX,
   BONE_SCALE_MIN,
+  CharacterPoseSnapshot,
   EnvironmentalAnchorId,
   GridConfig,
   JointId,
   JointMode,
+  KeystoneOrigin,
   MEGAPYXL_PX,
   PAPER_HEIGHT,
   PAPER_WIDTH,
   PYXL_PX,
   PhysicsModeId,
+  PoseHistoryState,
   PosePresetId,
-  PoseSnapshot,
   SilhouetteDisplayMode,
 } from './types';
 import {
   JOINT_SPECS,
   applyJointAngleConstraint,
+  armatureToCharacterSnapshot,
+  characterSnapshotToArmature,
   clampAngle180,
   computeArmature,
   computeModelBounds,
   computeModelWorkingSquare,
   createPosePreset,
-  createPoseSnapshot,
   formatSignedNum,
   getPhysicsMultiplier,
   interpolateArmatureShortestPath,
@@ -50,18 +53,31 @@ const INITIAL_INTERTITLE: IntertitleItem = {
   position: 'below-model',
 };
 
+const MAX_POSE_HISTORY = 64;
+
 export default function App() {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const autoFitRef = useRef<boolean>(true);
   const transitionRafRef = useRef<number | null>(null);
 
-  const [armature, setArmature] = useState<ArmatureState>(() =>
-    createPosePreset('vitruvian')
-  );
-  const [activePreset, setActivePreset] = useState<PosePresetId | null>('vitruvian');
+  // Initialize strictly to the canonical Vitruvian T-Pose baseline
+  const [poseSession, setPoseSession] = useState<PoseHistoryState>(() => {
+    const initial = createPosePreset('tpose');
+    return {
+      currentPose: initial,
+      lastPose: null,
+      history: [initial],
+      historyIndex: 0,
+    };
+  });
+
+  const armature = poseSession.currentPose;
+
+  const [activePreset, setActivePreset] = useState<PosePresetId | null>('tpose');
   const [selectedJointId, setSelectedJointId] = useState<JointId>('r_wrist');
   const [hoveredJointId, setHoveredJointId] = useState<JointId | null>(null);
-  const [snapshots, setSnapshots] = useState<PoseSnapshot[]>([]);
+  const [snapshots, setSnapshots] = useState<CharacterPoseSnapshot[]>([]);
 
   const [borderOpacity, setBorderOpacity] = useState<number>(1.0);
 
@@ -105,6 +121,56 @@ export default function App() {
     [armature, canvasOrigin]
   );
 
+  const setLiveArmature = useCallback((updater: (prev: ArmatureState) => ArmatureState) => {
+    setPoseSession((prev) => ({
+      ...prev,
+      currentPose: updater(prev.currentPose),
+    }));
+  }, []);
+
+  const commitPoseMilestone = useCallback((targetPose?: ArmatureState) => {
+    setPoseSession((prev) => {
+      const nextPose = targetPose ?? prev.currentPose;
+      const head = prev.history[prev.historyIndex];
+      if (head === nextPose) return prev;
+      const sliced = prev.history.slice(0, prev.historyIndex + 1);
+      const nextHistory = [...sliced, nextPose];
+      const trimmed =
+        nextHistory.length > MAX_POSE_HISTORY
+          ? nextHistory.slice(nextHistory.length - MAX_POSE_HISTORY)
+          : nextHistory;
+      return {
+        currentPose: nextPose,
+        lastPose: head ?? prev.lastPose,
+        history: trimmed,
+        historyIndex: trimmed.length - 1,
+      };
+    });
+  }, []);
+
+  const applyAndCommitPose = useCallback(
+    (updater: (prev: ArmatureState) => ArmatureState) => {
+      setPoseSession((prev) => {
+        const nextPose = updater(prev.currentPose);
+        if (nextPose === prev.currentPose) return prev;
+        const head = prev.history[prev.historyIndex];
+        const sliced = prev.history.slice(0, prev.historyIndex + 1);
+        const nextHistory = [...sliced, nextPose];
+        const trimmed =
+          nextHistory.length > MAX_POSE_HISTORY
+            ? nextHistory.slice(nextHistory.length - MAX_POSE_HISTORY)
+            : nextHistory;
+        return {
+          currentPose: nextPose,
+          lastPose: head ?? prev.currentPose,
+          history: trimmed,
+          historyIndex: trimmed.length - 1,
+        };
+      });
+    },
+    []
+  );
+
   const cancelPoseTransition = useCallback(() => {
     if (transitionRafRef.current !== null) {
       window.cancelAnimationFrame(transitionRafRef.current);
@@ -113,27 +179,30 @@ export default function App() {
   }, []);
 
   const animateToArmature = useCallback(
-    (targetState: ArmatureState, durationMs = 280) => {
+    (targetState: ArmatureState, durationMs = 280, recordHistory = true) => {
       cancelPoseTransition();
       const startState = armature;
+      if (recordHistory) {
+        commitPoseMilestone(targetState);
+      }
       const startTime = performance.now();
 
       const step = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(1, elapsed / durationMs);
         const frameState = interpolateArmatureShortestPath(startState, targetState, t);
-        setArmature(frameState);
+        setLiveArmature(() => frameState);
         if (t < 1) {
           transitionRafRef.current = window.requestAnimationFrame(step);
         } else {
           transitionRafRef.current = null;
-          setArmature(targetState);
+          setLiveArmature(() => targetState);
         }
       };
 
       transitionRafRef.current = window.requestAnimationFrame(step);
     },
-    [armature, cancelPoseTransition]
+    [armature, cancelPoseTransition, commitPoseMilestone, setLiveArmature]
   );
 
   useEffect(() => cancelPoseTransition, [cancelPoseTransition]);
@@ -232,11 +301,48 @@ export default function App() {
   const handleUpdateArmature = useCallback(
     (next: ArmatureState) => {
       cancelPoseTransition();
-      setArmature(next);
+      setLiveArmature(() => next);
       setActivePreset(null);
     },
-    [cancelPoseTransition]
+    [cancelPoseTransition, setLiveArmature]
   );
+
+  const handleCommitPoseHistory = useCallback(() => {
+    commitPoseMilestone();
+  }, [commitPoseMilestone]);
+
+  const handleUndo = useCallback(() => {
+    if (poseSession.historyIndex <= 0) return;
+    const nextIdx = poseSession.historyIndex - 1;
+    const targetPose = poseSession.history[nextIdx];
+    setPoseSession((prev) => ({
+      ...prev,
+      lastPose: prev.currentPose,
+      historyIndex: nextIdx,
+    }));
+    setActivePreset(null);
+    animateToArmature(targetPose, 220, false);
+  }, [animateToArmature, poseSession.history, poseSession.historyIndex]);
+
+  const handleRedo = useCallback(() => {
+    if (poseSession.historyIndex >= poseSession.history.length - 1) return;
+    const nextIdx = poseSession.historyIndex + 1;
+    const targetPose = poseSession.history[nextIdx];
+    setPoseSession((prev) => ({
+      ...prev,
+      lastPose: prev.currentPose,
+      historyIndex: nextIdx,
+    }));
+    setActivePreset(null);
+    animateToArmature(targetPose, 220, false);
+  }, [animateToArmature, poseSession.history, poseSession.historyIndex]);
+
+  const handleToggleLastPose = useCallback(() => {
+    if (!poseSession.lastPose) return;
+    const target = poseSession.lastPose;
+    setActivePreset(null);
+    animateToArmature(target, 240, true);
+  }, [animateToArmature, poseSession.lastPose]);
 
   const handleSelectPreset = useCallback(
     (preset: PosePresetId) => {
@@ -254,17 +360,18 @@ export default function App() {
 
   const handleResetPose = useCallback(() => {
     cancelPoseTransition();
-    setArmature(createPosePreset('vitruvian'));
-    setActivePreset('vitruvian');
+    const baseline = createPosePreset('tpose');
+    applyAndCommitPose(() => baseline);
+    setActivePreset('tpose');
     autoFitRef.current = true;
     fitPaperToStage();
-  }, [cancelPoseTransition, fitPaperToStage]);
+  }, [applyAndCommitPose, cancelPoseTransition, fitPaperToStage]);
 
   const handleChangeJointAngle = useCallback(
-    (id: JointId, nextLocalAngle: number) => {
+    (id: JointId, nextLocalAngle: number, recordHistory = false) => {
       cancelPoseTransition();
       setActivePreset(null);
-      setArmature((prev) => {
+      const update = (prev: ArmatureState): ArmatureState => {
         const constrained = applyJointAngleConstraint(nextLocalAngle, prev.continuousSpin);
         if (id === 'waist') {
           return { ...prev, rootRotation: constrained };
@@ -279,19 +386,23 @@ export default function App() {
             },
           },
         };
-      });
+      };
+      if (recordHistory) {
+        applyAndCommitPose(update);
+      } else {
+        setLiveArmature(update);
+      }
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition, setLiveArmature]
   );
 
   const handleSetContinuousSpin = useCallback(
     (enabled: boolean) => {
       cancelPoseTransition();
-      setArmature((prev) => {
+      applyAndCommitPose((prev) => {
         if (enabled) {
           return { ...prev, continuousSpin: true };
         }
-        // Enforcing strict [-180.00, +180.00] clamping when Continuous Spin is OFF
         const nextJoints = { ...prev.joints };
         for (const spec of JOINT_SPECS) {
           nextJoints[spec.id] = {
@@ -307,33 +418,32 @@ export default function App() {
         };
       });
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   const handleChangePhysicsMode = useCallback(
     (id: JointId, mode: PhysicsModeId) => {
       cancelPoseTransition();
-      setArmature((prev) => ({
+      applyAndCommitPose((prev) => ({
         ...prev,
         joints: {
           ...prev.joints,
           [id]: {
             ...prev.joints[id],
             physicsMode: mode,
-            // Mode E defaults to 1.00x upon selection
             modeERatio: mode === 'mode_e' ? 1.0 : prev.joints[id].modeERatio,
           },
         },
       }));
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   const handleChangeModeERatio = useCallback(
     (id: JointId, ratio: number) => {
       cancelPoseTransition();
       const clamped = Math.max(0, Math.min(10, Math.round(ratio * 100) / 100));
-      setArmature((prev) => ({
+      applyAndCommitPose((prev) => ({
         ...prev,
         joints: {
           ...prev.joints,
@@ -344,13 +454,13 @@ export default function App() {
         },
       }));
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   const handleChangeBoneScale = useCallback(
-    (id: JointId, patch: { scaleLength?: number; scaleWidth?: number }) => {
+    (id: JointId, patch: { scaleLength?: number; scaleWidth?: number }, recordHistory = false) => {
       cancelPoseTransition();
-      setArmature((prev) => {
+      const update = (prev: ArmatureState): ArmatureState => {
         const cur = prev.joints[id];
         const nextLen =
           patch.scaleLength !== undefined
@@ -371,20 +481,36 @@ export default function App() {
             },
           },
         };
-      });
+      };
+      if (recordHistory) {
+        applyAndCommitPose(update);
+      } else {
+        setLiveArmature(update);
+      }
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition, setLiveArmature]
+  );
+
+  const handleChangeKeystone = useCallback(
+    (keystone: KeystoneOrigin) => {
+      cancelPoseTransition();
+      applyAndCommitPose((prev) => ({
+        ...prev,
+        internalKeystone: keystone,
+      }));
+    },
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   const handleChangeEnvironmentalAnchor = useCallback(
     (anchor: EnvironmentalAnchorId) => {
       cancelPoseTransition();
-      setArmature((prev) => ({
+      applyAndCommitPose((prev) => ({
         ...prev,
         environmentalAnchor: anchor,
       }));
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   useEffect(() => {
@@ -395,9 +521,8 @@ export default function App() {
 
   const handleToggleAnchorPin = useCallback(() => {
     cancelPoseTransition();
-    setArmature((prev) => {
+    applyAndCommitPose((prev) => {
       if (prev.isAnchorPinned) {
-        // Sync current pinned visual waist coordinates into free rootX/rootY so unpinning is zero-jump
         const solved = computeArmature(prev, canvasOrigin);
         return {
           ...prev,
@@ -411,47 +536,53 @@ export default function App() {
         isAnchorPinned: true,
       };
     });
-  }, [cancelPoseTransition, canvasOrigin]);
+  }, [applyAndCommitPose, cancelPoseTransition, canvasOrigin]);
 
   const handleChangeRootPosition = useCallback(
     (x: number, y: number) => {
       cancelPoseTransition();
       setActivePreset(null);
-      setArmature((prev) => ({
+      applyAndCommitPose((prev) => ({
         ...prev,
         rootX: x,
         rootY: y,
       }));
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   const handleChangeJointMode = useCallback(
     (id: JointId, mode: JointMode) => {
       cancelPoseTransition();
-      setArmature((prev) => setJointMode(prev, id, mode));
+      applyAndCommitPose((prev) => setJointMode(prev, id, mode));
     },
-    [cancelPoseTransition]
+    [applyAndCommitPose, cancelPoseTransition]
   );
 
   const handleSaveSnapshot = useCallback(() => {
     setSnapshots((prev) => {
       const nextIdx = prev.length + 1;
-      const snap = createPoseSnapshot(armature, `Pose ${String(nextIdx).padStart(2, '0')}`);
+      const snap = armatureToCharacterSnapshot(
+        armature,
+        `Pose ${String(nextIdx).padStart(2, '0')}`,
+        silhouetteMode
+      );
       return [snap, ...prev];
     });
-  }, [armature]);
+  }, [armature, silhouetteMode]);
 
   const handleRecallSnapshot = useCallback(
-    (snapshot: PoseSnapshot) => {
+    (snapshot: CharacterPoseSnapshot) => {
       setActivePreset(null);
-      animateToArmature(snapshot.armature);
+      setSilhouetteMode(snapshot.viewMode);
+      const restored = characterSnapshotToArmature(snapshot, armature);
+      animateToArmature(restored);
     },
-    [animateToArmature]
+    [animateToArmature, armature]
   );
 
-  const handleDeleteSnapshot = useCallback((id: string) => {
-    setSnapshots((prev) => prev.filter((s) => s.id !== id));
+  const handleDeleteSnapshot = useCallback((snapshotId: string) => {
+    setSnapshots((prev) => prev.filter((s) => s.snapshotId !== snapshotId));
   }, []);
 
   const handleUpdateGrid = useCallback((patch: Partial<GridConfig>) => {
@@ -493,7 +624,24 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === 'INPUT' || !showFigure) return;
+      if (document.activeElement?.tagName === 'INPUT') return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      if (!showFigure) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         const current = computedJoints[selectedJointId];
         const runtime = armature.joints[selectedJointId];
@@ -502,12 +650,20 @@ export default function App() {
         const mult = getPhysicsMultiplier(runtime);
         const baseStep = e.shiftKey ? 0.25 : 1.0;
         const delta = (e.key === 'ArrowRight' ? baseStep : -baseStep) * mult;
-        handleChangeJointAngle(selectedJointId, current.localAngle + delta);
+        handleChangeJointAngle(selectedJointId, current.localAngle + delta, true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [armature.joints, computedJoints, handleChangeJointAngle, selectedJointId, showFigure]);
+  }, [
+    armature.joints,
+    computedJoints,
+    handleChangeJointAngle,
+    handleRedo,
+    handleUndo,
+    selectedJointId,
+    showFigure,
+  ]);
 
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden bg-[#E0E0E0] text-[#F2EEF7]">
@@ -522,9 +678,15 @@ export default function App() {
         onSelectPreset={handleSelectPreset}
         onMirrorPose={handleMirrorPose}
         onResetPose={handleResetPose}
+        canUndo={poseSession.historyIndex > 0}
+        canRedo={poseSession.historyIndex < poseSession.history.length - 1}
+        hasLastPose={poseSession.lastPose !== null}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onToggleLastPose={handleToggleLastPose}
       />
 
-      {/* Responsive Workspace: Zero overlapping overlays; Canvas always >= 2/3 of viewing space */}
+      {/* Strict 2/3 Stage Canvas + 1/3 Dark #16001E Console Split Layout */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0">
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <div
@@ -550,8 +712,10 @@ export default function App() {
               onSelectJoint={setSelectedJointId}
               onHoverJoint={setHoveredJointId}
               onUpdateArmature={handleUpdateArmature}
+              onCommitPoseHistory={handleCommitPoseHistory}
               onCursorMove={setCursorCoords}
               stageRef={stageRef}
+              svgRef={svgRef}
               intertitleItem={activeIntertitle}
               intertitleDismissing={intertitleDismissing}
               onTriggerDismissIntertitle={handleDismissIntertitle}
@@ -561,28 +725,28 @@ export default function App() {
 
           {/* Dedicated Bottom Status, Console Tab & Zoom Strip */}
           <div className="h-9 px-3 console-panel border-b-0 border-x-0 flex items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-4 font-typewriter text-[11px] min-w-0 overflow-x-auto whitespace-nowrap">
+            <div className="flex items-center gap-4 text-[11px] min-w-0 overflow-x-auto whitespace-nowrap">
               <div>
-                <span className="text-[#9E8EB3] mr-1">X</span>
-                <span className="font-bold text-[#FAF6FF]">
+                <span className="font-vera text-[#9E8EB3] mr-1">X</span>
+                <span className="font-typewriter font-bold text-[#FAF6FF]">
                   {cursorCoords ? `${formatSignedNum(cursorCoords.x)} px` : '+0.00 px'}
                 </span>
-                <span className="text-[#C8B2E0] ml-1">
+                <span className="font-typewriter text-[#C8B2E0] ml-1">
                   ({cursorCoords ? `${formatSignedNum(cursorCoords.x / PYXL_PX)} pyx` : '+0.00 pyx'})
                 </span>
               </div>
               <div>
-                <span className="text-[#9E8EB3] mr-1">Y</span>
-                <span className="font-bold text-[#FAF6FF]">
+                <span className="font-vera text-[#9E8EB3] mr-1">Y</span>
+                <span className="font-typewriter font-bold text-[#FAF6FF]">
                   {cursorCoords ? `${formatSignedNum(cursorCoords.y)} px` : '+0.00 px'}
                 </span>
-                <span className="text-[#C8B2E0] ml-1">
+                <span className="font-typewriter text-[#C8B2E0] ml-1">
                   ({cursorCoords ? `${formatSignedNum(cursorCoords.y / PYXL_PX)} pyx` : '+0.00 pyx'})
                 </span>
               </div>
               <div className="hidden sm:block">
-                <span className="text-[#9E8EB3] mr-1">mpyx</span>
-                <span className="font-bold text-[#E9D5FF]">
+                <span className="font-vera text-[#9E8EB3] mr-1">mpyx</span>
+                <span className="font-typewriter font-bold text-[#E9D5FF]">
                   {cursorCoords
                     ? `${formatSignedNum(cursorCoords.x / MEGAPYXL_PX)}, ${formatSignedNum(
                         cursorCoords.y / MEGAPYXL_PX
@@ -597,7 +761,7 @@ export default function App() {
                 type="button"
                 onClick={() => setInspectorOpen((v) => !v)}
                 title={inspectorOpen ? 'Collapse console inspector' : 'Expand console inspector'}
-                className={`px-2.5 py-0.5 mr-1 font-typewriter font-bold text-[10.5px] rounded-[2px] border flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                className={`px-2.5 py-0.5 mr-1 font-vera font-bold text-[10.5px] rounded-[2px] border flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                   inspectorOpen
                     ? 'bg-[#361547] border-[#D8B4FE]/40 text-[#FAF6FF]'
                     : 'bg-[#21072B]/80 border-[#EBE0F5]/18 text-[#C8B2E0] hover:text-[#FAF6FF]'
@@ -614,7 +778,7 @@ export default function App() {
                 type="button"
                 onClick={() => setCameraUnlocked((v) => !v)}
                 title="Hold Shift or toggle to enable click-and-drag camera pan & wheel zoom"
-                className={`px-2 py-0.5 mr-1 font-typewriter font-bold text-[10.5px] rounded-[2px] border flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                className={`px-2 py-0.5 mr-1 font-vera font-bold text-[10.5px] rounded-[2px] border flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                   shiftHeld || cameraUnlocked
                     ? 'bg-[#361547] border-[#D8B4FE]/45 text-[#FAF6FF]'
                     : 'bg-[#21072B]/70 border-[#EBE0F5]/16 text-[#B8A9C9] hover:text-[#FAF6FF]'
@@ -651,7 +815,7 @@ export default function App() {
                 type="button"
                 onClick={handleFitClick}
                 title="Fit working frame to viewport"
-                className="px-2 py-0.5 font-typewriter font-bold text-[10.5px] text-[#D8B4FE] hover:bg-[#2A0E38] rounded-[2px] flex items-center gap-1 cursor-pointer"
+                className="px-2 py-0.5 font-vera font-bold text-[10.5px] text-[#D8B4FE] hover:bg-[#2A0E38] rounded-[2px] flex items-center gap-1 cursor-pointer"
               >
                 <Maximize2 className="w-3 h-3" />
                 Fit
@@ -671,10 +835,12 @@ export default function App() {
             onChangePhysicsMode={handleChangePhysicsMode}
             onChangeModeERatio={handleChangeModeERatio}
             onChangeBoneScale={handleChangeBoneScale}
+            onChangeKeystone={handleChangeKeystone}
             onChangeEnvironmentalAnchor={handleChangeEnvironmentalAnchor}
             onToggleAnchorPin={handleToggleAnchorPin}
             onChangeRootPosition={handleChangeRootPosition}
             onChangeJointMode={handleChangeJointMode}
+            onCommitPoseHistory={handleCommitPoseHistory}
             snapshots={snapshots}
             onSaveSnapshot={handleSaveSnapshot}
             onRecallSnapshot={handleRecallSnapshot}

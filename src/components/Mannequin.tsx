@@ -228,15 +228,17 @@ export const Mannequin: React.FC<MannequinProps> = ({
             />
           </g>
 
-          {/* Interactive 10px Default / 15px Hover Joint Dots */}
+          {/* Interactive 10px Red Joint Dots & 15px Hover Halos */}
           <g>
             {JOINT_SPECS.map((spec) => {
               const joint = computedJoints[spec.id];
               const runtime = armature.joints[spec.id];
               const isSelected = selectedJointId === spec.id;
               const isHovered = hoveredJointId === spec.id;
-              const dotRadius = isHovered ? 7.5 : 5;
               const isRigid = runtime.physicsMode === 'rigid';
+              const isKeystoneJoint =
+                (armature.internalKeystone === 'navel' && joint.id === 'navel') ||
+                (armature.internalKeystone === 'crown' && joint.id === 'head');
 
               return (
                 <g
@@ -258,54 +260,48 @@ export const Mannequin: React.FC<MannequinProps> = ({
                   <g transform={`scale(${1 / zoom})`}>
                     <circle r={16} fill="transparent" />
 
+                    {/* Selected 10px joint target ring */}
                     {isSelected && (
-                      <>
-                        <circle
-                          r={16}
-                          fill="none"
-                          stroke="#6D28D9"
-                          strokeWidth={1.5}
-                          strokeDasharray="3 3"
-                        />
-                        <circle
-                          r={11.5}
-                          fill="rgba(109, 40, 217, 0.16)"
-                          stroke="#F6F2FA"
-                          strokeWidth={1.25}
-                        />
-                      </>
-                    )}
-
-                    {isHovered && !isSelected && (
                       <circle
-                        r={13}
-                        fill="rgba(3, 105, 161, 0.14)"
-                        stroke="#0369A1"
+                        r={12.5}
+                        fill="rgba(220, 38, 38, 0.14)"
+                        stroke="#EF4444"
                         strokeWidth={1.25}
+                        strokeDasharray="3 3"
                       />
                     )}
 
+                    {/* 15px (r=7.5) crimson hover halo */}
+                    {isHovered && (
+                      <circle
+                        r={7.5}
+                        fill="rgba(220, 38, 38, 0.28)"
+                        stroke="#EF4444"
+                        strokeWidth={1.5}
+                      />
+                    )}
+
+                    {/* 10px (r=5) default red joint dot */}
                     <circle
-                      r={dotRadius}
+                      r={5}
                       fill={
                         joint.mode === 'PIN' || isRigid
-                          ? '#991B1B'
-                          : isSelected
-                          ? '#6D28D9'
-                          : '#16001E'
+                          ? '#7F1D1D'
+                          : isSelected || isHovered
+                          ? '#EF4444'
+                          : '#DC2626'
                       }
                       stroke="#F6F2FA"
-                      strokeWidth={1.75}
+                      strokeWidth={1.5}
                       style={{
-                        transition:
-                          'r 140ms cubic-bezier(0.16, 1, 0.3, 1), fill 140ms ease',
+                        transition: 'fill 140ms ease',
                       }}
                     />
 
                     <circle
                       r={1.5}
                       fill={
-                        joint.id === 'navel'
+                        isKeystoneJoint
                           ? '#FBBF24'
                           : joint.mode === 'IK'
                           ? '#7DD3FC'

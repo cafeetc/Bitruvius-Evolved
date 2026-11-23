@@ -5,6 +5,8 @@ import {
   BONE_SCALE_MIN,
   BonePlateId,
   BoneRenderDescriptor,
+  BoneScale,
+  CharacterPoseSnapshot,
   ComputedJoint,
   EnvironmentalAnchorId,
   JointId,
@@ -16,7 +18,7 @@ import {
   PhysicsModeId,
   PivotOffset,
   PosePresetId,
-  PoseSnapshot,
+  SilhouetteDisplayMode,
   WorkingSquareBase,
 } from '../types';
 
@@ -1458,36 +1460,128 @@ export function solveBoneAimRotation(
 }
 
 /**
- * Snapshot save policy:
- * - Continuous Spin OFF -> normalize all joint angles into canonical [-180.00°, +180.00°]
- * - Continuous Spin ON  -> preserve raw accumulated angles (>360°)
+ * Serializes current ArmatureState into a canonical Phase 3 CharacterPoseSnapshot:
+ * - `joints` always holds 18 normalized angles in [-180.00°, +180.00°]
+ * - When `continuousSpin` is ON, `armature` retains raw >360° rotational sweeps
+ * - When `continuousSpin` is OFF, `armature` angles are also normalized to [-180.00°, +180.00°]
  */
-export function createPoseSnapshot(state: ArmatureState, name: string): PoseSnapshot {
-  const jointsCopy = {} as Record<JointId, JointRuntimeState>;
-  const normalize = !state.continuousSpin;
+export function armatureToCharacterSnapshot(
+  state: ArmatureState,
+  label: string,
+  viewMode: SilhouetteDisplayMode = 'wireframe'
+): CharacterPoseSnapshot {
+  const joints = {} as Record<JointId, number>;
+  const jointModes = {} as Record<JointId, JointMode>;
+  const physicsModes = {} as Record<JointId, PhysicsModeId>;
+  const modeEValues = {} as Record<JointId, number>;
+  const perJointScale = {} as Record<JointId, BoneScale>;
+  const armatureJointsCopy = {} as Record<JointId, JointRuntimeState>;
+
+  const normalizeArmatureOnSave = !state.continuousSpin;
+  let sumLen = 0;
+  let sumWid = 0;
 
   for (const spec of JOINT_SPECS) {
     const rt = state.joints[spec.id];
-    jointsCopy[spec.id] = {
+    const baseAngle = spec.id === 'waist' ? state.rootRotation : rt.localAngle;
+    const normalized = snapAnglePrecision(normalizeAngleDeg(baseAngle));
+
+    joints[spec.id] = normalized;
+    jointModes[spec.id] = rt.mode;
+    physicsModes[spec.id] = rt.physicsMode;
+    modeEValues[spec.id] = rt.modeERatio;
+    perJointScale[spec.id] = { length: rt.scaleLength, width: rt.scaleWidth };
+
+    sumLen += rt.scaleLength;
+    sumWid += rt.scaleWidth;
+
+    armatureJointsCopy[spec.id] = {
       ...rt,
-      localAngle: normalize
+      localAngle: normalizeArmatureOnSave
         ? snapAnglePrecision(normalizeAngleDeg(rt.localAngle))
         : snapAnglePrecision(rt.localAngle),
     };
   }
 
+  const limbLength = Number((sumLen / JOINT_SPECS.length).toFixed(3));
+  const limbWidth = Number((sumWid / JOINT_SPECS.length).toFixed(3));
+
   return {
-    id: `snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    name,
-    createdAt: Date.now(),
-    normalizedOnSave: normalize,
+    snapshotId: `snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    label,
+    timestamp: Date.now(),
+    viewMode,
+    joints,
+    jointModes,
+    physicsModes,
+    modeEValues,
+    proportions: {
+      globalScale: Number(((limbLength + limbWidth) / 2).toFixed(3)),
+      limbWidth,
+      limbLength,
+      perJoint: perJointScale,
+    },
+    keystone: state.internalKeystone,
+    environmentalAnchor: state.environmentalAnchor,
+    navelPin: state.isAnchorPinned,
+    continuousSpin: state.continuousSpin,
+    rootX: state.rootX,
+    rootY: state.rootY,
     armature: {
       ...state,
-      rootRotation: normalize
+      rootRotation: normalizeArmatureOnSave
         ? snapAnglePrecision(normalizeAngleDeg(state.rootRotation))
         : snapAnglePrecision(state.rootRotation),
-      joints: jointsCopy,
+      joints: armatureJointsCopy,
     },
+  };
+}
+
+export function createPoseSnapshot(
+  state: ArmatureState,
+  name: string,
+  viewMode: SilhouetteDisplayMode = 'wireframe'
+): CharacterPoseSnapshot {
+  return armatureToCharacterSnapshot(state, name, viewMode);
+}
+
+/**
+ * Restores a full executable ArmatureState from a CharacterPoseSnapshot.
+ */
+export function characterSnapshotToArmature(
+  snapshot: CharacterPoseSnapshot,
+  fallback?: ArmatureState
+): ArmatureState {
+  if (snapshot.armature) {
+    return snapshot.armature;
+  }
+
+  const joints = {} as Record<JointId, JointRuntimeState>;
+  for (const spec of JOINT_SPECS) {
+    const prev = fallback?.joints[spec.id];
+    const perJoint = snapshot.proportions.perJoint?.[spec.id];
+    joints[spec.id] = {
+      localAngle:
+        spec.id === 'waist'
+          ? 0
+          : snapshot.joints[spec.id] ?? prev?.localAngle ?? spec.defaultLocalAngle,
+      mode: snapshot.jointModes[spec.id] ?? prev?.mode ?? spec.defaultMode,
+      physicsMode: snapshot.physicsModes?.[spec.id] ?? prev?.physicsMode ?? 'twins',
+      modeERatio: snapshot.modeEValues[spec.id] ?? prev?.modeERatio ?? 1.0,
+      scaleLength: perJoint?.length ?? snapshot.proportions.limbLength ?? 1.0,
+      scaleWidth: perJoint?.width ?? snapshot.proportions.limbWidth ?? 1.0,
+    };
+  }
+
+  return {
+    rootX: snapshot.rootX ?? fallback?.rootX ?? PAPER_WIDTH / 2,
+    rootY: snapshot.rootY ?? fallback?.rootY ?? PAPER_HEIGHT / 2,
+    rootRotation: snapshot.joints.waist ?? fallback?.rootRotation ?? 0,
+    continuousSpin: snapshot.continuousSpin,
+    internalKeystone: snapshot.keystone,
+    environmentalAnchor: snapshot.environmentalAnchor,
+    isAnchorPinned: snapshot.navelPin,
+    joints,
   };
 }
 
@@ -1516,14 +1610,16 @@ export function interpolateArmatureShortestPath(
         : a.localAngle + delta * eased;
 
     nextJoints[spec.id] = {
-      ...a,
+      ...(clampedT >= 1 ? b : a),
       localAngle: snapAnglePrecision(interpolatedAngle, 0.01),
+      scaleLength: a.scaleLength + (b.scaleLength - a.scaleLength) * eased,
+      scaleWidth: a.scaleWidth + (b.scaleWidth - a.scaleWidth) * eased,
     };
   }
 
   const rootDelta = shortestAngleDelta(fromState.rootRotation, toState.rootRotation);
   return {
-    ...fromState,
+    ...(clampedT >= 1 ? toState : fromState),
     rootX: fromState.rootX + (toState.rootX - fromState.rootX) * eased,
     rootY: fromState.rootY + (toState.rootY - fromState.rootY) * eased,
     rootRotation:

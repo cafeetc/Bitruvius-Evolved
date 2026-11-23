@@ -120,21 +120,19 @@ function renderBoneSilhouette(id: BonePlateId, dx: number, dy: number): React.Re
       );
 
     case 'r_thigh': {
-      // Right thigh: viewer left; greater trochanter & lateral quad flare outward along -Y
+      // Right thigh: viewer left; femoral head (r=28) encloses all proximal neck vertices inside Waist bowl
       const oy = -Math.abs(dy);
       return (
         <g>
-          {/* Femoral head concentric inside Waist acetabulum */}
-          <circle cx={0} cy={0} r={26} />
-          {/* 127° femoral neck bridge & sculpted asymmetrical thigh silhouette */}
+          <circle cx={0} cy={0} r={28} />
           <path
             d={
-              `M ${dx - 10} ${oy * 0.4 - 16} ` +
-              `C ${dx + 22} ${oy - 32}, 68 ${oy - 32}, 130 -27 ` +
+              `M ${dx - 8} ${oy * 0.35 - 15} ` +
+              `C ${dx + 22} ${oy - 31}, 68 ${oy - 32}, 130 -27 ` +
               'C 176 -23, 206 -20, 225 -19 ' +
               'A 19 19 0 0 1 225 19 ' +
               'C 202 20, 170 22, 126 26 ' +
-              `C 68 32, ${dx + 24} ${oy + 30}, ${dx - 4} ${oy + 22} ` +
+              `C 68 32, ${dx + 22} ${oy + 29}, ${dx - 2} ${oy + 19} ` +
               'Z'
             }
           />
@@ -143,19 +141,19 @@ function renderBoneSilhouette(id: BonePlateId, dx: number, dy: number): React.Re
     }
 
     case 'l_thigh': {
-      // Left thigh: viewer right; greater trochanter & lateral quad flare outward along +Y
+      // Left thigh: viewer right; femoral head (r=28) encloses all proximal neck vertices inside Waist bowl
       const oy = Math.abs(dy);
       return (
         <g>
-          <circle cx={0} cy={0} r={26} />
+          <circle cx={0} cy={0} r={28} />
           <path
             d={
-              `M ${dx - 4} ${oy - 22} ` +
-              `C ${dx + 24} ${oy - 30}, 68 -32, 126 -26 ` +
+              `M ${dx - 2} ${oy - 19} ` +
+              `C ${dx + 22} ${oy - 29}, 68 -32, 126 -26 ` +
               'C 170 -22, 202 -20, 225 -19 ' +
               'A 19 19 0 0 1 225 19 ' +
               `C 206 20, 176 23, 130 27 ` +
-              `C 68 ${oy + 32}, ${dx + 22} ${oy + 32}, ${dx - 10} ${oy * 0.4 + 16} ` +
+              `C 68 ${oy + 32}, ${dx + 22} ${oy + 31}, ${dx - 8} ${oy * 0.35 + 15} ` +
               'Z'
             }
           />
@@ -202,19 +200,19 @@ function renderBoneSilhouette(id: BonePlateId, dx: number, dy: number): React.Re
     }
 
     case 'r_upper_arm': {
-      // Right upper arm: viewer left shoulder -> -Y faces superior/deltoid cap when raised laterally
+      // Right upper arm: deltoid sphere (r=24) keeps shoulder socket seamlessly seated inside Collar yoke
       const oy = -Math.abs(dy);
       return (
         <g>
-          <circle cx={0} cy={0} r={21} />
+          <circle cx={0} cy={0} r={24} />
           <path
             d={
-              `M ${dx - 14} ${oy - 14} ` +
-              `C ${dx + 16} ${oy - 28}, 52 ${oy - 26}, 96 -20 ` +
+              `M ${dx - 6} ${oy * 0.5 - 16} ` +
+              `C ${dx + 18} ${oy - 27}, 52 ${oy - 25}, 96 -20 ` +
               'C 134 -16, 156 -15, 175 -15 ' +
               'A 15 15 0 0 1 175 15 ' +
               'C 152 16, 124 19, 86 21 ' +
-              `C 46 23, ${dx + 14} ${oy * 0.3 + 22}, ${dx - 8} ${oy * 0.2 + 18} ` +
+              `C 46 23, ${dx + 14} ${oy * 0.3 + 20}, ${dx - 4} ${oy * 0.2 + 16} ` +
               'Z'
             }
           />
@@ -223,18 +221,19 @@ function renderBoneSilhouette(id: BonePlateId, dx: number, dy: number): React.Re
     }
 
     case 'l_upper_arm': {
+      // Left upper arm: deltoid sphere (r=24) keeps shoulder socket seamlessly seated inside Collar yoke
       const oy = Math.abs(dy);
       return (
         <g>
-          <circle cx={0} cy={0} r={21} />
+          <circle cx={0} cy={0} r={24} />
           <path
             d={
-              `M ${dx - 8} ${oy * 0.2 - 18} ` +
-              `C ${dx + 14} ${oy * 0.3 - 22}, 46 -23, 86 -21 ` +
+              `M ${dx - 4} ${oy * 0.2 - 16} ` +
+              `C ${dx + 14} ${oy * 0.3 - 20}, 46 -23, 86 -21 ` +
               'C 124 -19, 152 -16, 175 -15 ' +
               'A 15 15 0 0 1 175 15 ' +
               'C 156 15, 134 16, 96 20 ' +
-              `C 52 ${oy + 26}, ${dx + 16} ${oy + 28}, ${dx - 14} ${oy + 14} ` +
+              `C 52 ${oy + 25}, ${dx + 18} ${oy + 27}, ${dx - 6} ${oy * 0.5 + 16} ` +
               'Z'
             }
           />
@@ -247,7 +246,7 @@ function renderBoneSilhouette(id: BonePlateId, dx: number, dy: number): React.Re
       const sgn = id === 'r_forearm' ? -1 : 1;
       return (
         <g>
-          <circle cx={0} cy={0} r={15} />
+          <circle cx={0} cy={0} r={16} />
           <path
             d={
               `M 0 ${-15 * sgn} ` +
@@ -267,17 +266,20 @@ function renderBoneSilhouette(id: BonePlateId, dx: number, dy: number): React.Re
     case 'l_hand': {
       const sgn = id === 'r_hand' ? 1 : -1;
       return (
-        <path
-          d={
-            `M -4 ${-9 * sgn} ` +
-            `C 14 ${-13 * sgn}, 32 ${-16 * sgn}, 48 ${-19 * sgn} ` +
-            `C 56 ${-21 * sgn}, 60 ${-15 * sgn}, 44 ${-10 * sgn} ` +
-            `C 64 ${-11 * sgn}, 92 ${-9 * sgn}, 92 ${-2 * sgn} ` +
-            `C 92 ${5 * sgn}, 82 ${11 * sgn}, 56 ${12 * sgn} ` +
-            `C 34 ${13 * sgn}, 14 ${11 * sgn}, -4 ${9 * sgn} ` +
-            'Z'
-          }
-        />
+        <g>
+          <circle cx={0} cy={0} r={11} />
+          <path
+            d={
+              `M -2 ${-9 * sgn} ` +
+              `C 14 ${-13 * sgn}, 32 ${-16 * sgn}, 48 ${-19 * sgn} ` +
+              `C 56 ${-21 * sgn}, 60 ${-15 * sgn}, 44 ${-10 * sgn} ` +
+              `C 64 ${-11 * sgn}, 92 ${-9 * sgn}, 92 ${-2 * sgn} ` +
+              `C 92 ${5 * sgn}, 82 ${11 * sgn}, 56 ${12 * sgn} ` +
+              `C 34 ${13 * sgn}, 14 ${11 * sgn}, -2 ${9 * sgn} ` +
+              'Z'
+            }
+          />
+        </g>
       );
     }
   }

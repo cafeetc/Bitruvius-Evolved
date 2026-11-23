@@ -6,6 +6,13 @@ export type JointMode = 'ROOT' | 'FK' | 'IK' | 'PIN';
 
 export type PosePresetId = 'vitruvian' | 'tpose' | 'contrapposto' | 'striding';
 
+export type StudioExportFormat =
+  | 'pose_json'
+  | 'svg_snapshot'
+  | 'transparent_png'
+  | 'adaptive_png'
+  | 'lottie_json';
+
 /**
  * Canonical 18-joint kinematic skeleton:
  * - 6 axial joints: waist (Bottom of Spine), navel (Keystone), torso, collar, neck, head (Cranium/Crown)
@@ -97,6 +104,13 @@ export interface BoneScale {
   width: number;  // 0.50x - 2.00x perpendicular to bone axis
 }
 
+export interface CharacterPoseProportions {
+  globalScale: number;
+  limbWidth: number;
+  limbLength: number;
+  perJoint?: Record<JointId, BoneScale>;
+}
+
 export interface JointSpec {
   id: JointId;
   label: string;
@@ -104,8 +118,8 @@ export interface JointSpec {
   subtitle: string;
   parentId: JointId | null;
   lengthPx: number;
-  endExtensionPx?: number; // Terminal limb bone extension (e.g., head->crown, wrist->hand tip, ankle->foot sole)
-  socketOffset?: PivotOffset; // Offset from parent joint center in parent's local frame (e.g., femoral cup, shoulder glenohumeral)
+  endExtensionPx?: number; // Terminal limb bone extension (head->crown, wrist->hand tip, ankle->foot sole)
+  socketOffset?: PivotOffset; // Offset from parent joint center in parent's local frame (femoral cup, shoulder glenohumeral)
   bodyPartCategory?: BodyPartCategory;
   isSpine?: boolean;
   defaultLocalAngle: number;
@@ -144,7 +158,7 @@ export interface ArmatureState {
   rootY: number;
   rootRotation: number;
   continuousSpin: boolean;
-  internalKeystone: KeystoneOrigin; // 'navel' immutable for anatomical physics & scaling (schema supports future 'crown')
+  internalKeystone: KeystoneOrigin; // 'navel' default vs 'crown' toggle
   environmentalAnchor: EnvironmentalAnchorId; // defaults to 'bottom_of_spine'
   isAnchorPinned: boolean; // true locks active environmental anchor to canvas origin (0,0); false allows free X/Y
   joints: Record<JointId, JointRuntimeState>;
@@ -166,13 +180,38 @@ export interface BoneRenderDescriptor {
   zIndex: number;
 }
 
-export interface PoseSnapshot {
-  id: string;
-  name: string;
-  createdAt: number;
-  normalizedOnSave: boolean;
-  armature: ArmatureState;
+/**
+ * Phase 3 Canonical Pose Snapshot Specification.
+ * Encapsulates normalized 18-joint FK state, per-joint modes, physics Mode E values,
+ * aggregate & per-joint bone proportions, keystone/environmental anchor state, and spin mode.
+ */
+export interface CharacterPoseSnapshot {
+  snapshotId: string;
+  label: string;
+  timestamp: number;
+  viewMode: SilhouetteDisplayMode;
+  joints: Record<JointId, number>; // 18 normalized angles in [-180.00, +180.00]
+  jointModes: Record<JointId, JointMode>;
+  physicsModes: Record<JointId, PhysicsModeId>;
+  modeEValues: Record<JointId, number>;
+  proportions: CharacterPoseProportions;
+  keystone: KeystoneOrigin;
+  environmentalAnchor: EnvironmentalAnchorId;
+  navelPin: boolean;
+  continuousSpin: boolean;
+  rootX: number;
+  rootY: number;
+  armature?: ArmatureState;
 }
+
+export interface PoseHistoryState {
+  currentPose: ArmatureState;
+  lastPose: ArmatureState | null;
+  history: ArmatureState[];
+  historyIndex: number;
+}
+
+export type PoseSnapshot = CharacterPoseSnapshot;
 
 export interface GridConfig {
   showSubpyxl: boolean;  // 10px = 0.10 pyx
@@ -217,3 +256,9 @@ export const PAPER_HEIGHT = 1800;
 export const SUBPYXL_PX = 10;
 export const PYXL_PX = 100;
 export const MEGAPYXL_PX = 1000;
+
+export const REPOSITORY_ASSET_PATHS = {
+  vectorBorderSvg: '/assets/aistudio/Vector_paper_2dac36ce.svg',
+  vectorPaperSvg: '/assets/aistudio/Vector_paper_png_2dac36ce.svg',
+  analogPaperPng: '/assets/aistudio/Analog_paper_png_1a4024ad.png',
+} as const;
